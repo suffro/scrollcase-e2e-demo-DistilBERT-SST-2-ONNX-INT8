@@ -29,9 +29,9 @@
 
 ### Verified
 
-Built and run on `macos-aarch64-cpu`: build self-test passed on both sentences,
-`verify --self-test` passed, `run` returned `POSITIVE 99.9%` and `NEGATIVE 100.0%`, both consumers
-returned the same output, and a rebuild produced a byte-identical archive (~192 MiB).
+All three targets pass on native CI runners: build, `verify --self-test`, both fixed phrases, both
+consumer examples, and a rebuild that produces no second archive. On `macos-aarch64-cpu` the
+archive is ~192 MiB and `run` returns `POSITIVE 99.9%` and `NEGATIVE 100.0%`.
 
 ### Not yet done
 
