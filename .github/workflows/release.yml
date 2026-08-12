@@ -51,13 +51,10 @@ jobs:
         include:
           - target: linux-x86_64-cpu
             runner: ubuntu-latest
-            pixi_asset: pixi-x86_64-unknown-linux-musl.tar.gz
           - target: macos-aarch64-cpu
             runner: macos-14
-            pixi_asset: pixi-aarch64-apple-darwin.tar.gz
           - target: windows-x86_64-cpu
             runner: windows-latest
-            pixi_asset: pixi-x86_64-pc-windows-msvc.zip
 
     defaults:
       run:
@@ -79,32 +76,19 @@ jobs:
           npm ci --no-audit --no-fund
           npm install --global "scrollcase@${SCROLLCASE_VERSION}"
 
-      - name: Install pixi and conda-pack into the workspace toolchain
+      # See build.yml: the CLI's own pixi downloader is unreliable against the
+      # GitHub release CDN, so the maintained action does that job instead.
+      - uses: prefix-dev/setup-pixi@v0
+        with:
+          pixi-version: v${{ env.PIXI_VERSION }}
+          run-install: false
+          cache: false
+
+      - name: Install conda-pack into the workspace toolchain
         run: |
-          # See build.yml: the CLI's own downloader is unreliable on some hosts,
-          # so these are its steps over HTTP/1.1, same published checksum.
-          base="https://github.com/prefix-dev/pixi/releases/download/v${PIXI_VERSION}/${{ matrix.pixi_asset }}"
-          stage="$(mktemp -d)"
-
-          curl -fsSL --http1.1 --retry 5 --retry-all-errors "$base.sha256" -o "$stage/expected"
-          curl -fsSL --http1.1 --retry 5 --retry-all-errors "$base" -o "$stage/pixi-archive"
-
-          expected="$(tr 'A-Z' 'a-z' < "$stage/expected" | grep -oE '[a-f0-9]{64}' | head -1)"
-          actual="$(sha256sum "$stage/pixi-archive" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$stage/pixi-archive" | cut -d' ' -f1)"
-          test "$expected" = "$actual" || {
-            echo "::error::pixi checksum mismatch"; exit 1; }
-
-          mkdir -p .scrollcase/toolchain/bin
-          case "${{ matrix.pixi_asset }}" in
-            *.zip) unzip -q "$stage/pixi-archive" -d "$stage/unpacked" ;;
-            *)     mkdir -p "$stage/unpacked" && tar -xzf "$stage/pixi-archive" -C "$stage/unpacked" ;;
-          esac
-          find "$stage/unpacked" -name 'pixi*' -type f -exec cp {} .scrollcase/toolchain/bin/ \;
-          chmod +x .scrollcase/toolchain/bin/pixi* || true
-          rm -rf "$stage"
-
-          PIXI_HOME="$PWD/.scrollcase/toolchain" .scrollcase/toolchain/bin/pixi global install \
+          PIXI_HOME="$PWD/.scrollcase/toolchain" pixi global install \
             "conda-pack==${CONDA_PACK_VERSION}"
+          echo "PIXI_BIN=$(command -v pixi)" >> "$GITHUB_ENV"
 
       - name: Materialise the demo signing key
         env:
@@ -124,6 +108,7 @@ jobs:
             echo "::error::the checkout is dirty before the build"; exit 1; }
           scrollcase build "sentiment-demo/${{ matrix.target }}" \
             --weights embed \
+            --pixi "$PIXI_BIN" \
             --private-key "$RUNNER_TEMP/signing-private.pem" \
             --public-key "$PUBLIC_KEY"
 
