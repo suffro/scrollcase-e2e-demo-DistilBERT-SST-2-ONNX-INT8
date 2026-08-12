@@ -36,7 +36,7 @@ env:
   SCROLLCASE_VERSION: "0.9.1"
   PIXI_VERSION: "0.73.0"
   CONDA_PACK_VERSION: "0.9.2"
-  PUBLIC_KEY: sentiment-demo.pub.json
+  PUBLIC_KEY: keys/sentiment-demo-public.json
   POSITIVE_SENTENCE: "This product is surprisingly easy to use."
   NEGATIVE_SENTENCE: "This was a frustrating and disappointing experience."
 
@@ -130,22 +130,36 @@ jobs:
               echo "::error::expected $expected, got '$label'"; exit 1; }
           done
 
-      - name: Wrap the archive, release document, consumers and README
+      - name: Wrap each target as one plainly named archive
         run: |
+          # Same shape as the existing demo release: the signed pair under
+          # box/, the consumer examples beside it, and no public key -- a
+          # signature proves nothing if the key arrives in the same download.
+          shopt -s nullglob
+          dir="${{ steps.release.outputs.dir }}"
+          zips=("$dir"/*.zip)
+          releases=("$dir"/*.release.json)
+          if [ "${#zips[@]}" -ne 1 ] || [ "${#releases[@]}" -ne 1 ]; then
+            echo "::error::expected one archive and one release document in $dir"
+            ls -l "$dir"
+            exit 1
+          fi
+
           name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
-          mkdir -p "wrapper/$name/consumers"
-          cp "${{ steps.release.outputs.dir }}"/*.release.json "wrapper/$name/"
-          cp "${{ steps.release.outputs.dir }}"/*.zip "wrapper/$name/"
-          cp release/README.md "wrapper/$name/"
+          stage="staging/${{ matrix.target }}"
+          mkdir -p "$stage/box"
+          cp "${zips[0]}" "${releases[0]}" "$stage/box/"
           cp consumers/run-box.mjs consumers/run_box.py consumers/package.json \
-             consumers/package-lock.json consumers/requirements.txt "wrapper/$name/consumers/"
+             consumers/package-lock.json consumers/requirements.txt "$stage/"
+          cp release/README.md "$stage/"
 
-          # The public key is deliberately NOT bundled: a signature that ships
-          # with its own key proves nothing. Consumers fetch it from the repo.
-          test ! -e "wrapper/$name/$PUBLIC_KEY" || {
-            echo "::error::the wrapper must not ship the public key"; exit 1; }
-
-          (cd wrapper && zip -qr "$name.zip" "$name")
+          mkdir -p wrapper
+          # Entries named explicitly rather than with `.`, so the archive carries
+          # no `./` prefix and no stray dotfile from the staging directory.
+          ( cd "$stage" && zip -0 -X -r -q "$GITHUB_WORKSPACE/wrapper/$name.zip" \
+              box run-box.mjs run_box.py package.json package-lock.json \
+              requirements.txt README.md )
+          unzip -l "wrapper/$name.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -248,13 +262,14 @@ jobs:
           npm install --global "scrollcase@${SCROLLCASE_VERSION}"
           name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
           dir="$RUNNER_TEMP/unpacked/$name"
-          release="$(ls "$dir"/*.release.json | head -1)"
+          release="$(ls "$dir"/box/*.release.json | head -1)"
 
           # The public key comes from the checked-out repository, independently
           # of the downloaded archive -- never from inside the wrapper.
           key="$GITHUB_WORKSPACE/$PUBLIC_KEY"
-          test ! -e "$dir/$PUBLIC_KEY" || {
-            echo "::error::the wrapper must not ship the public key"; exit 1; }
+          if find "$dir" -name 'sentiment-demo-public.json' | grep -q .; then
+            echo "::error::the wrapper must not ship the public key"; exit 1
+          fi
 
           scrollcase verify "$release" --public-key "$key" --self-test
 
@@ -267,10 +282,10 @@ jobs:
         run: |
           name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
           dir="$RUNNER_TEMP/unpacked/$name"
-          release="$(ls "$dir"/*.release.json | head -1)"
+          release="$(ls "$dir"/box/*.release.json | head -1)"
           key="$GITHUB_WORKSPACE/$PUBLIC_KEY"
 
-          cd "$dir/consumers"
+          cd "$dir"
           npm ci --no-audit --no-fund
           node run-box.mjs "$release" "$key" $POSITIVE_SENTENCE
 
