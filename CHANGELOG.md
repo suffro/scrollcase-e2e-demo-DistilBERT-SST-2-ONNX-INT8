@@ -1,43 +1,38 @@
 # Changelog
 
-All notable changes to this repository are documented here.
-
 ## [Unreleased]
 
 ### Added
 
-- **Sentiment demo (`examples/sentiment-demo/`)** — an end-to-end demo built around DistilBERT
-  SST-2 in ONNX INT8 form, with a shared `entrypoint.py`, three target scrolls
-  (`linux-x86_64-cpu`, `macos-aarch64-cpu`, `windows-x86_64-cpu`), and Node and Python consumer
-  examples pinned to exact versions. The `hello-box` demo is unchanged.
-- **Codespaces workshop (`examples/sentiment-demo/codespaces/`)** — the canonical source of the
-  companion repository. It builds a Linux box from an empty workspace through explicit guided
-  edits, and does not depend on the prebuilt release.
-- **Model notice and licence** — `MODEL_NOTICE.md` and the full Apache-2.0 text, hashed and
-  shipped in every box under `THIRD_PARTY_NOTICES/distilbert/`, attributing the original
-  checkpoint and the ONNX conversion separately, with the documented bias limitations linked.
-- **Demo page (`docs/demos/sentiment-demo.md`)** — two independent calls to action: build it in
-  Codespaces, or download a prebuilt signed box.
-- **Native build workflow** — all three CPU targets, on a weekly schedule and on relevant pushes.
-  It builds, verifies, runs both fixed phrases, exercises both consumers, and asserts that a
-  rebuild produces no second archive. It publishes nothing.
-- **Manual release workflow** — draft by default, with a dedicated demo signing key kept out of
-  the workspace, and a post-upload matrix that downloads the published wrapper again and verifies
-  it on a matching host.
-- **Contract and entrypoint test suites** — `npm test` validates all three scrolls against the
-  schema published by the pinned `scrollcase` package itself, then proves the fixed identity
-  contract, the permitted per-target differences, the local-file hashes, commit-pinned asset URLs,
-  exact consumer pins, the real consumer API calls, and the workshop's command order and
-  documented paths; the Python suite proves argument handling, label mapping, stable softmax and
-  output formatting through injected fakes, with no ML dependencies installed.
+- **A ready-to-build Scrollcase project** for DistilBERT SST-2 (ONNX, INT8). Three target scrolls
+  under `scrolls/sentiment-demo/` — `linux-x86_64-cpu`, `macos-aarch64-cpu`,
+  `windows-x86_64-cpu` — each with its pixi manifest, committed lock and reviewed licence audit.
+  Opening the Codespace and running `keygen` then `build` produces a signed box.
+- **The box application** (`box-entrypoints/sentiment-demo/entrypoint.py`): reads a sentence,
+  loads the embedded ONNX model on the CPU, prints the label and a one-decimal confidence. It
+  imports no Hugging Face client and resolves its files from its own directory.
+- **Model assets pinned to an immutable revision**, hash- and size-checked at build time, embedded
+  in the box so nothing is downloaded at run time.
+- **Model notice and Apache-2.0 text** under `THIRD_PARTY_NOTICES/distilbert/`, hashed into every
+  box, attributing the original checkpoint and the ONNX conversion separately and linking the
+  documented bias limitations.
+- **Node and Python consumer examples** (`consumers/`), pinned to exactly `scrollcase@0.9.1` and
+  `scrollcase-consumer==0.4.1`.
+- **A build workflow** covering all three targets on native runners: build, verify with the signed
+  self-test, run both fixed phrases, exercise both consumers, and assert that a rebuild produces
+  no second archive. It publishes nothing.
+- **A manual release workflow** that publishes the prebuilt boxes as a draft release, then
+  downloads each published wrapper again on a matching host and verifies it.
+- **Tests** (`npm test`): the scrolls are validated against the schema the pinned `scrollcase`
+  package publishes, plus file hashes, commit-pinned asset URLs, exact consumer pins, no CUDA in
+  any lock, and the entrypoint's behaviour through injected fakes — no ML dependencies needed.
 
-- **Locked environments and licence audits** — `pixi.lock` and `conda-licenses.json` for all three
-  targets, resolved with pixi 0.73.0. Every target pins a CPU `onnxruntime` build; no lock
-  selected CUDA, and a test now enforces that.
+### Verified
 
-### Not yet included
+Built and run on `macos-aarch64-cpu`: build self-test passed on both sentences,
+`verify --self-test` passed, `run` returned `POSITIVE 99.9%` and `NEGATIVE 100.0%`, both consumers
+returned the same output, and a rebuild produced a byte-identical archive (~192 MiB).
 
-The companion Codespaces repository, the dedicated signing key and the published release belong
-to later, separately authorized phases. See the *Known gaps* section of
-[`examples/sentiment-demo/README.md`](examples/sentiment-demo/README.md#known-gaps) — they are
-absent rather than estimated.
+### Not yet done
+
+The dedicated signing key and the published release are separate, manual steps.

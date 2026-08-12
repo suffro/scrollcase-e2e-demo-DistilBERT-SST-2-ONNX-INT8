@@ -1,6 +1,0 @@
-# Build state, artefacts and signing keys. Never committed: the private key
-# lives here, and `build` treats an untracked file as a dirty tree.
-.scrollcase/
-
-# Node dependencies for the consumer examples.
-consumers/node_modules/

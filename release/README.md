@@ -24,7 +24,7 @@ A signature is worth nothing if the key travels with it. Get the public key from
 repository instead, over a channel independent of this download:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/suffro/scrollcase/main/examples/sentiment-demo/sentiment-demo.pub.json
+curl -fsSLO https://raw.githubusercontent.com/suffro/scrollcase-e2e-demo-DistilBERT-SST-2-ONNX-INT8/main/sentiment-demo.pub.json
 ```
 
 ## Verify, then run

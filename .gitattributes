@@ -1,12 +1,16 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Files whose SHA-256 is declared in a scroll must keep their exact bytes on
-# every platform. A Windows checkout that rewrote a line ending here would
-# break the build with a hash mismatch, so these are never normalised.
-examples/sentiment-demo/shared/entrypoint.py -text
-examples/sentiment-demo/shared/MODEL_NOTICE.md -text
-examples/sentiment-demo/shared/APACHE-2.0.txt -text
+# Files whose exact bytes are checked: either hashed into a scroll, or compared
+# byte-for-byte by the build. A Windows checkout that rewrote a line ending in
+# any of these fails the build, so they are never normalised.
+#
+# The patterns have no slash, so they match at any depth and survive a move.
+entrypoint.py -text
+MODEL_NOTICE.md -text
+APACHE-2.0.txt -text
+conda-licenses.json -text
+pixi.lock -text
 
 # Shell scripts must stay LF even on a Windows checkout.
 *.sh text eol=lf

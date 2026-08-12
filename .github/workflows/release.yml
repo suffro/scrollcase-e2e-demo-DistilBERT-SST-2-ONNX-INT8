@@ -1,9 +1,9 @@
-# Manual-only publication of the prebuilt sentiment-demo boxes.
+# Publishes the prebuilt boxes as a GitHub release.
 #
-# Separate from the native build workflow on purpose: that one proves the demo
-# still works, this one spends a real signing key and touches a public release.
-# It is never triggered by a push, and it creates a draft by default.
-name: sentiment-demo release
+# Separate from `build` on purpose: that one proves the demo still works, this
+# one spends a real signing key and touches a public release. Manual only, and
+# a draft by default.
+name: release
 
 on:
   workflow_dispatch:
@@ -26,7 +26,7 @@ on:
         required: true
 
 concurrency:
-  group: sentiment-demo-release
+  group: release
   cancel-in-progress: false
 
 permissions:
@@ -34,8 +34,9 @@ permissions:
 
 env:
   SCROLLCASE_VERSION: "0.9.1"
-  SCROLLS_DIR: examples
-  PUBLIC_KEY: examples/sentiment-demo/sentiment-demo.pub.json
+  PIXI_VERSION: "0.73.0"
+  CONDA_PACK_VERSION: "0.9.2"
+  PUBLIC_KEY: sentiment-demo.pub.json
   POSITIVE_SENTENCE: "This product is surprisingly easy to use."
   NEGATIVE_SENTENCE: "This was a frustrating and disappointing experience."
 
@@ -50,10 +51,13 @@ jobs:
         include:
           - target: linux-x86_64-cpu
             runner: ubuntu-latest
+            pixi_asset: pixi-x86_64-unknown-linux-musl.tar.gz
           - target: macos-aarch64-cpu
             runner: macos-14
+            pixi_asset: pixi-aarch64-apple-darwin.tar.gz
           - target: windows-x86_64-cpu
             runner: windows-latest
+            pixi_asset: pixi-x86_64-pc-windows-msvc.zip
 
     defaults:
       run:
@@ -70,18 +74,37 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install the pinned toolchain and restore a clean tree
+      - name: Install the Scrollcase CLI
         run: |
           npm ci --no-audit --no-fund
           npm install --global "scrollcase@${SCROLLCASE_VERSION}"
-          scrollcase init --no-example --install-toolchain --pixi-version 0.73.0
-          git checkout -- .
-          git clean -fd
-          test -z "$(git status --porcelain)" || {
-            echo "::error::checkout is dirty after init scaffolding"
-            git status --porcelain
-            exit 1
-          }
+
+      - name: Install pixi and conda-pack into the workspace toolchain
+        run: |
+          # See build.yml: the CLI's own downloader is unreliable on some hosts,
+          # so these are its steps over HTTP/1.1, same published checksum.
+          base="https://github.com/prefix-dev/pixi/releases/download/v${PIXI_VERSION}/${{ matrix.pixi_asset }}"
+          stage="$(mktemp -d)"
+
+          curl -fsSL --http1.1 --retry 5 --retry-all-errors "$base.sha256" -o "$stage/expected"
+          curl -fsSL --http1.1 --retry 5 --retry-all-errors "$base" -o "$stage/pixi-archive"
+
+          expected="$(tr 'A-Z' 'a-z' < "$stage/expected" | grep -oE '[a-f0-9]{64}' | head -1)"
+          actual="$(sha256sum "$stage/pixi-archive" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$stage/pixi-archive" | cut -d' ' -f1)"
+          test "$expected" = "$actual" || {
+            echo "::error::pixi checksum mismatch"; exit 1; }
+
+          mkdir -p .scrollcase/toolchain/bin
+          case "${{ matrix.pixi_asset }}" in
+            *.zip) unzip -q "$stage/pixi-archive" -d "$stage/unpacked" ;;
+            *)     mkdir -p "$stage/unpacked" && tar -xzf "$stage/pixi-archive" -C "$stage/unpacked" ;;
+          esac
+          find "$stage/unpacked" -name 'pixi*' -type f -exec cp {} .scrollcase/toolchain/bin/ \;
+          chmod +x .scrollcase/toolchain/bin/pixi* || true
+          rm -rf "$stage"
+
+          PIXI_HOME="$PWD/.scrollcase/toolchain" .scrollcase/toolchain/bin/pixi global install \
+            "conda-pack==${CONDA_PACK_VERSION}"
 
       - name: Materialise the demo signing key
         env:
@@ -97,8 +120,9 @@ jobs:
 
       - name: Build and sign
         run: |
+          test -z "$(git status --porcelain)" || {
+            echo "::error::the checkout is dirty before the build"; exit 1; }
           scrollcase build "sentiment-demo/${{ matrix.target }}" \
-            --scrolls-dir "$SCROLLS_DIR" \
             --weights embed \
             --private-key "$RUNNER_TEMP/signing-private.pem" \
             --public-key "$PUBLIC_KEY"
@@ -110,7 +134,6 @@ jobs:
           release="$(ls "$dir"/*.release.json | head -1)"
           test -n "$release" || { echo "::error::no release produced"; exit 1; }
           echo "dir=$dir" >> "$GITHUB_OUTPUT"
-          echo "path=$release" >> "$GITHUB_OUTPUT"
 
           scrollcase verify "$release" --public-key "$PUBLIC_KEY" --self-test
 
@@ -128,21 +151,16 @@ jobs:
           mkdir -p "wrapper/$name/consumers"
           cp "${{ steps.release.outputs.dir }}"/*.release.json "wrapper/$name/"
           cp "${{ steps.release.outputs.dir }}"/*.zip "wrapper/$name/"
-          cp examples/sentiment-demo/release/README.md "wrapper/$name/"
-          cp examples/sentiment-demo/consumers/run-box.mjs \
-             examples/sentiment-demo/consumers/run_box.py \
-             examples/sentiment-demo/consumers/package.json \
-             examples/sentiment-demo/consumers/package-lock.json \
-             examples/sentiment-demo/consumers/requirements.txt \
-             "wrapper/$name/consumers/"
+          cp release/README.md "wrapper/$name/"
+          cp consumers/run-box.mjs consumers/run_box.py consumers/package.json \
+             consumers/package-lock.json consumers/requirements.txt "wrapper/$name/consumers/"
 
           # The public key is deliberately NOT bundled: a signature that ships
           # with its own key proves nothing. Consumers fetch it from the repo.
-          test ! -e "wrapper/$name/sentiment-demo.pub.json" || {
+          test ! -e "wrapper/$name/$PUBLIC_KEY" || {
             echo "::error::the wrapper must not ship the public key"; exit 1; }
 
           (cd wrapper && zip -qr "$name.zip" "$name")
-          ls -l "wrapper/$name.zip"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -184,8 +202,7 @@ jobs:
           tag="${{ inputs.tag }}"
           gh release view "$tag" >/dev/null 2>&1 || \
             gh release create "$tag" --title "${{ inputs.title }}" \
-              ${{ inputs.draft && '--draft' || '' }} \
-              --notes-file examples/sentiment-demo/release/README.md
+              ${{ inputs.draft && '--draft' || '' }} --notes-file release/README.md
 
           # Upload first. A window where the release exists with no working
           # asset is worse than one where a superseded asset is still present.
@@ -240,7 +257,6 @@ jobs:
           name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
           gh release download "${{ inputs.tag }}" --pattern "$name.zip" --dir "$RUNNER_TEMP"
           unzip -q "$RUNNER_TEMP/$name.zip" -d "$RUNNER_TEMP/unpacked"
-          ls -R "$RUNNER_TEMP/unpacked"
 
       - name: Verify and run it exactly as a user would
         run: |
@@ -252,7 +268,7 @@ jobs:
           # The public key comes from the checked-out repository, independently
           # of the downloaded archive -- never from inside the wrapper.
           key="$GITHUB_WORKSPACE/$PUBLIC_KEY"
-          test ! -e "$dir/sentiment-demo.pub.json" || {
+          test ! -e "$dir/$PUBLIC_KEY" || {
             echo "::error::the wrapper must not ship the public key"; exit 1; }
 
           scrollcase verify "$release" --public-key "$key" --self-test

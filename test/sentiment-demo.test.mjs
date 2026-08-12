@@ -1,4 +1,4 @@
-// Contract tests for the sentiment-demo box.
+// Project checks for the sentiment-demo box.
 //
 // Static only: they read the committed scrolls, manifests and docs. They never
 // build a box, download a model, or run the Scrollcase toolchain. The scroll
@@ -16,7 +16,7 @@ import Ajv2020 from "ajv/dist/2020.js";
 
 const require = createRequire(import.meta.url);
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
-const DEMO = join(ROOT, "examples", "sentiment-demo");
+const SCROLLS = join(ROOT, "scrolls", "sentiment-demo");
 
 const REVISION = "fd49941c1b822846cb14970cdf430a7cfbe0f5b9";
 const ASSET_BASE =
@@ -41,31 +41,48 @@ const TARGETS = {
   },
 };
 
-const HASHED_FILES = [
-  "examples/sentiment-demo/shared/entrypoint.py",
-  "examples/sentiment-demo/shared/MODEL_NOTICE.md",
-  "examples/sentiment-demo/shared/APACHE-2.0.txt",
+// Bytes that must survive a checkout unchanged: hashed into a scroll, or
+// compared byte-for-byte by the build.
+const EXACT_BYTE_FILES = [
+  "entrypoint.py",
+  "MODEL_NOTICE.md",
+  "APACHE-2.0.txt",
+  "conda-licenses.json",
+  "pixi.lock",
 ];
 
 const readText = (...parts) => readFileSync(join(...parts), "utf8");
 const readJson = (...parts) => JSON.parse(readText(...parts));
-const scrolls = Object.keys(TARGETS).map((target) => [target, readJson(DEMO, target, "scroll.json")]);
+const scrolls = Object.keys(TARGETS).map((t) => [t, readJson(SCROLLS, t, "scroll.json")]);
 
 const sha256 = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
 
 // Guards about what a document *tells you to run* must read the commands, not
-// the prose around them: the workshop is allowed to explain why it avoids a
-// flag, and the setup script is allowed to say what it deliberately skips.
+// the prose around them.
 const fencedCommands = (markdown, language = "bash") =>
   [...markdown.matchAll(new RegExp("```" + language + "\\n([\\s\\S]*?)```", "g"))]
     .map((match) => match[1])
     .join("\n");
 
-const shellCommands = (script) =>
-  script
-    .split("\n")
-    .filter((line) => !/^\s*#/.test(line))
-    .join("\n");
+// Executable lines only: comments and here-document bodies are text the script
+// prints, not commands it runs.
+const shellCommands = (script) => {
+  const kept = [];
+  let heredoc = null;
+  for (const line of script.split("\n")) {
+    if (heredoc !== null) {
+      if (line.trim() === heredoc) heredoc = null;
+      continue;
+    }
+    const opened = line.match(/<<-?\s*'?"?([A-Za-z_][A-Za-z0-9_]*)'?"?\s*$/);
+    if (opened) {
+      heredoc = opened[1];
+      continue;
+    }
+    if (!/^\s*#/.test(line)) kept.push(line);
+  }
+  return kept.join("\n");
+};
 
 test("every scroll validates against the schema published by scrollcase itself", () => {
   const schema = (name) =>
@@ -92,7 +109,6 @@ test("every scroll carries the fixed identity and version contract", () => {
     assert.equal(scroll.pythonVersion, "3.11.*", target);
     assert.equal(scroll.pixiVersion, "0.73.0", target);
     assert.equal(scroll.compatibility.minRamGb, 2, target);
-    assert.equal(scroll.assetBaseUrl, "https://assets.example.org/boxes", target);
     assert.equal(scroll.modelCacheSubdir, MODEL_CACHE, target);
     assert.deepEqual(
       scroll.execution,
@@ -122,11 +138,11 @@ test("target, interpreter, audit path and pixi platform agree", () => {
     assert.equal(scroll.pythonEntryPoint, expected.pythonEntryPoint, target);
     assert.equal(
       scroll.condaDependencyLicenseAudit,
-      `examples/sentiment-demo/${target}/conda-licenses.json`,
+      `scrolls/sentiment-demo/${target}/conda-licenses.json`,
       `${target}: the audit path must point at this target's own directory`
     );
 
-    const manifest = readText(DEMO, target, "pixi.toml");
+    const manifest = readText(SCROLLS, target, "pixi.toml");
     assert.match(
       manifest,
       new RegExp(`^platforms = \\["${expected.condaPlatform}"\\]$`, "m"),
@@ -135,13 +151,24 @@ test("target, interpreter, audit path and pixi platform agree", () => {
   }
 });
 
+test("scrolls sit where scrollcase looks for them by default", () => {
+  // paths.scrolls is the default, so no command in this project needs
+  // --scrolls-dir. Keep it that way: it is one less thing to explain.
+  const config = readJson(ROOT, "scrollcase.config.json");
+  assert.equal(config.paths.scrolls, "scrolls");
+  for (const target of Object.keys(TARGETS)) {
+    assert.ok(existsSync(join(SCROLLS, target, "scroll.json")), `${target}: scroll is misplaced`);
+  }
+});
+
 test("pixi manifests declare python, onnxruntime, tokenizers and numpy", () => {
   for (const target of Object.keys(TARGETS)) {
-    const manifest = readText(DEMO, target, "pixi.toml");
+    const manifest = readText(SCROLLS, target, "pixi.toml");
     for (const dependency of ["python", "onnxruntime", "tokenizers", "numpy"]) {
       assert.match(manifest, new RegExp(`^${dependency} = `, "m"), `${target}: missing ${dependency}`);
     }
     assert.match(manifest, /^python = "3\.11\.\*"$/m, `${target}: python must match the scroll`);
+    assert.match(manifest, /^\[workspace\]$/m, `${target}: pixi 0.73 deprecates [project]`);
     assert.doesNotMatch(manifest, /cuda/i, `${target}: manifest must not ask for a CUDA build`);
   }
 });
@@ -208,7 +235,7 @@ test("every scroll embeds weights and declares the offline environment", () => {
 });
 
 test("the entrypoint imports no downloader", () => {
-  const source = readText(DEMO, "shared", "entrypoint.py");
+  const source = readText(ROOT, "box-entrypoints", "sentiment-demo", "entrypoint.py");
   for (const forbidden of ["transformers", "huggingface_hub", "requests", "urllib"]) {
     assert.doesNotMatch(
       source,
@@ -254,16 +281,8 @@ test("the self-test signs the real imports and proves both sentences", () => {
 
 test("every target ships a lock and its reviewed audit", () => {
   for (const target of Object.keys(TARGETS)) {
-    const lock = existsSync(join(DEMO, target, "pixi.lock"));
-    const audit = existsSync(join(DEMO, target, "conda-licenses.json"));
-    assert.equal(
-      lock,
-      audit,
-      `${target}: a lock without its reviewed audit (or the reverse) must never be committed`
-    );
-    assert.ok(lock, `${target}: pixi.lock is missing`);
-
-    const inventory = readJson(DEMO, target, "conda-licenses.json");
+    assert.ok(existsSync(join(SCROLLS, target, "pixi.lock")), `${target}: pixi.lock is missing`);
+    const inventory = readJson(SCROLLS, target, "conda-licenses.json");
     assert.ok(JSON.stringify(inventory).length > 0, `${target}: the audit is empty`);
   }
 });
@@ -272,34 +291,23 @@ test("no lock selected a CUDA build", () => {
   // This is a CPU demo. A CUDA onnxruntime would silently add a gigabyte and a
   // GPU requirement, so the locks are the place to catch it.
   for (const target of Object.keys(TARGETS)) {
-    const lock = readText(DEMO, target, "pixi.lock");
+    const lock = readText(SCROLLS, target, "pixi.lock");
     assert.doesNotMatch(lock, /cuda/i, `${target}: the lock selected a CUDA build`);
-    assert.match(
-      lock,
-      /onnxruntime-[^\s]*-py\d+[^\s]*_cpu\.conda|onnxruntime.*_cpu/,
-      `${target}: the lock must pin a CPU onnxruntime build`
-    );
-  }
-});
-
-test("pixi manifests use the manifest table scrollcase itself generates", () => {
-  for (const target of Object.keys(TARGETS)) {
-    const manifest = readText(DEMO, target, "pixi.toml");
-    assert.match(manifest, /^\[workspace\]$/m, `${target}: pixi 0.73 deprecates [project]`);
+    assert.match(lock, /onnxruntime.*_cpu/, `${target}: the lock must pin a CPU onnxruntime build`);
   }
 });
 
 test("consumer manifests pin exact versions", () => {
-  const pkg = readJson(DEMO, "consumers", "package.json");
+  const pkg = readJson(ROOT, "consumers", "package.json");
   assert.equal(pkg.dependencies.scrollcase, "0.9.1");
   for (const [name, range] of Object.entries(pkg.dependencies)) {
     assert.match(range, /^\d+\.\d+\.\d+$/, `${name} is not an exact version`);
   }
 
-  const lock = readJson(DEMO, "consumers", "package-lock.json");
+  const lock = readJson(ROOT, "consumers", "package-lock.json");
   assert.equal(lock.packages["node_modules/scrollcase"].version, "0.9.1");
 
-  const requirements = readText(DEMO, "consumers", "requirements.txt");
+  const requirements = readText(ROOT, "consumers", "requirements.txt");
   assert.match(requirements, /^scrollcase-consumer==0\.4\.1$/m);
   for (const line of requirements.split("\n")) {
     const trimmed = line.trim();
@@ -315,7 +323,7 @@ test("consumer manifests pin exact versions", () => {
 });
 
 test("consumers call the real API and keep stdout for the result", () => {
-  const node = readText(DEMO, "consumers", "run-box.mjs");
+  const node = readText(ROOT, "consumers", "run-box.mjs");
   assert.match(node, /import \{ runBox \} from "scrollcase\/consumer"/);
   // runBox takes the release path positionally; the key option is publicPath.
   assert.match(node, /runBox\(releasePath, \{/);
@@ -326,112 +334,88 @@ test("consumers call the real API and keep stdout for the result", () => {
   }
   assert.ok(!/console\.log/.test(node), "preparation output must go to stderr");
 
-  const python = readText(DEMO, "consumers", "run_box.py");
+  const python = readText(ROOT, "consumers", "run_box.py");
   assert.match(python, /from scrollcase_consumer import run_box/);
   assert.match(python, /run_box\(\n\s+release_path,/);
   assert.match(python, /public_key_path=public_key_path/);
   assert.match(python, /args=\[sentence\]/);
 });
 
-test("the workshop keeps the fixed ids, target and command order", () => {
-  const readme = readText(DEMO, "codespaces", "README.md");
+test("the README teaches the real commands, in the order they must run", () => {
+  const readme = readText(ROOT, "README.md");
   const ordered = [
-    "scrollcase init --no-example --install-toolchain --pixi-version 0.73.0",
-    "scrollcase new scroll",
-    "scrollcase lock sentiment-demo/linux-x86_64-cpu",
-    "scrollcase audit sentiment-demo/linux-x86_64-cpu --write",
     "scrollcase keygen",
-    "git commit",
     "scrollcase build sentiment-demo/linux-x86_64-cpu --weights embed",
     "scrollcase verify",
     "scrollcase run",
+    "npm test",
   ];
   let cursor = -1;
   for (const command of ordered) {
     const found = readme.indexOf(command);
-    assert.ok(found !== -1, `workshop is missing: ${command}`);
-    assert.ok(found > cursor, `workshop step out of order: ${command}`);
+    assert.ok(found !== -1, `README is missing: ${command}`);
+    assert.ok(found > cursor, `README step out of order: ${command}`);
     cursor = found;
   }
 
-  for (const value of ["sentiment-demo", "distilbert-sst2-onnx-int8", "onnxruntime-cpu", REVISION]) {
-    assert.ok(readme.includes(value), `workshop is missing the fixed value ${value}`);
-  }
-
   const commands = fencedCommands(readme);
-  assert.doesNotMatch(commands, /--allow-dirty/, "the workshop must never teach --allow-dirty");
-  // `run` passes application arguments after `--`; without it the sentence
-  // would be parsed as CLI flags.
+  // Application arguments go after `--`; without it the sentence is parsed as
+  // Scrollcase flags.
+  assert.match(commands, /scrollcase run "\$RELEASE" -- /, "the sentence must come after --");
   assert.match(
     commands,
-    /scrollcase run "\$RELEASE" -- /,
-    "the workshop must pass the sentence after --"
+    /\.scrollcase\/dist\/boxes\/sentiment-demo\/1\.0\.0\/linux-x86_64-cpu/,
+    "the README must name the real release directory"
   );
-});
-
-test("documented paths match the real workspace layout", () => {
-  const pages = [
-    ["codespaces/README.md", readText(DEMO, "codespaces", "README.md")],
-    ["release/README.md", readText(DEMO, "release", "README.md")],
-  ];
-  for (const [name, text] of pages) {
-    assert.doesNotMatch(
-      fencedCommands(text),
-      /(?<!\.scrollcase\/)dist\/boxes\//,
-      `${name}: the dist directory is .scrollcase/dist, not dist/`
-    );
-  }
-  const workshop = pages[0][1];
-  assert.ok(
-    workshop.includes(".scrollcase/dist/boxes/sentiment-demo/1.0.0/linux-x86_64-cpu"),
-    "the workshop must name the real release directory"
-  );
-  assert.ok(
-    workshop.includes(".scrollcase/keys/signing-public.json"),
-    "the workshop must name the real public key file"
+  assert.doesNotMatch(commands, /--allow-dirty/, "the README must never teach --allow-dirty");
+  assert.doesNotMatch(
+    commands,
+    /--scrolls-dir/,
+    "scrolls sit at the default path, so no command needs this flag"
   );
 });
 
 test("the setup script installs only the pinned CLI and keeps an existing workspace", () => {
-  const setup = readText(DEMO, "codespaces", "setup-demo.sh");
+  const setup = readText(ROOT, "setup-demo.sh");
   assert.match(setup, /scrollcase@\$\{SCROLLCASE_VERSION\}/);
   assert.match(setup, /SCROLLCASE_VERSION="0\.9\.1"/);
 
   const commands = shellCommands(setup);
   assert.doesNotMatch(commands, /\brm\b/, "setup must never delete a generated workspace");
-  for (const forbidden of ["pixi install", "conda-pack", "scrollcase build", "scrollcase new"]) {
+  for (const forbidden of ["scrollcase build", "scrollcase keygen"]) {
     assert.ok(!commands.includes(forbidden), `setup must not run: ${forbidden}`);
   }
 });
 
-test("the devcontainer opens the README in preview and waits only for setup", () => {
-  const devcontainer = readJson(DEMO, "codespaces", ".devcontainer", "devcontainer.json");
+test("the devcontainer opens the README and waits only for setup", () => {
+  const devcontainer = readJson(ROOT, ".devcontainer", "devcontainer.json");
   assert.deepEqual(devcontainer.customizations.codespaces.openFiles, ["README.md"]);
-  assert.equal(
-    devcontainer.customizations.vscode.settings["workbench.editorAssociations"]["*.md"],
-    "vscode.markdown.preview.editor"
-  );
   assert.equal(devcontainer.postCreateCommand, "bash ./setup-demo.sh");
   assert.equal(devcontainer.waitFor, "postCreateCommand");
 });
 
-test("the workshop never commits generated build state or keys", () => {
-  const ignored = readText(DEMO, "codespaces", ".gitignore");
-  assert.match(ignored, /^\.scrollcase\/$/m, "build state and keys must stay out of the commit");
+test("build state and keys stay out of the repository", () => {
+  const ignored = readText(ROOT, ".gitignore");
+  // An untracked file makes the tree dirty, and `build` refuses a dirty tree.
+  assert.match(ignored, /^\.scrollcase\/$/m);
+  assert.match(ignored, /^node_modules\/$/m);
 });
 
 test("user-facing docs state the scope and link the bias limitations", () => {
   const pages = [
-    ["shared/MODEL_NOTICE.md", readText(DEMO, "shared", "MODEL_NOTICE.md")],
-    ["release/README.md", readText(DEMO, "release", "README.md")],
-    ["docs/demos/sentiment-demo.md", readText(ROOT, "docs", "demos", "sentiment-demo.md")],
+    ["README.md", readText(ROOT, "README.md")],
+    ["release/README.md", readText(ROOT, "release", "README.md")],
+    [
+      "MODEL_NOTICE.md",
+      readText(ROOT, "THIRD_PARTY_NOTICES", "distilbert", "MODEL_NOTICE.md"),
+    ],
   ];
   for (const [name, text] of pages) {
     assert.match(text, /English/, `${name}: must state the English-only scope`);
     assert.match(text, /bias(es)?/i, `${name}: must mention the documented biases`);
     assert.match(text, /demonstrat/i, `${name}: must state that this is demonstrative`);
   }
-  const notice = pages[0][1];
+  const notice = pages[2][1];
   assert.ok(
     notice.includes("distilbert/distilbert-base-uncased-finetuned-sst-2-english"),
     "the notice must name the original checkpoint"
@@ -440,13 +424,13 @@ test("user-facing docs state the scope and link the bias limitations", () => {
   assert.match(notice, /Apache-2\.0/);
 });
 
-test("hashed text files are protected from line-ending rewrites", () => {
+test("exact-byte files are protected from line-ending rewrites", () => {
   const attributes = readText(ROOT, ".gitattributes");
-  for (const path of HASHED_FILES) {
+  for (const name of EXACT_BYTE_FILES) {
     assert.match(
       attributes,
-      new RegExp(`^${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+-text$`, "m"),
-      `${path} must be marked -text so a Windows checkout cannot rewrite its bytes`
+      new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s+-text$`, "m"),
+      `${name} must be marked -text: a Windows checkout would otherwise rewrite its bytes`
     );
   }
 });

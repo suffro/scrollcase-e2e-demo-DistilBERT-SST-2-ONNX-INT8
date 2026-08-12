@@ -51,9 +51,10 @@ cat <<'EOF'
 
 setup-demo: ready.
 
-Nothing has been built yet -- that is the workshop. Follow README.md, which
-should already be open in preview. Step 1 is:
+Nothing has been built yet. The scrolls and their locks are already in this
+repository, so building is two commands -- see README.md:
 
-    scrollcase init --no-example --install-toolchain --pixi-version 0.73.0
+    scrollcase keygen
+    scrollcase build sentiment-demo/linux-x86_64-cpu --weights embed
 
 EOF

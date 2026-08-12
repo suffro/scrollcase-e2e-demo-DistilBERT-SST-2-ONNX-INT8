@@ -14,7 +14,7 @@ import unittest
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
-SHARED = Path(__file__).resolve().parent.parent / "examples" / "sentiment-demo" / "shared"
+SHARED = Path(__file__).resolve().parent.parent / "box-entrypoints" / "sentiment-demo"
 sys.path.insert(0, str(SHARED))
 
 import entrypoint  # noqa: E402
