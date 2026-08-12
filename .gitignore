@@ -1,9 +1,11 @@
-.local-memory
+# local planning notes, never committed
+/.local-memory/
 
-# Scrollcase build state, artefacts, toolchain and signing keys. Never
-# committed -- and it must be ignored, because `build` treats an untracked
-# file as a dirty tree and refuses to run.
-.scrollcase/
+# scrollcase build state
+/.scrollcase/
 
+# Optional local consumer dependencies.
 node_modules/
-__pycache__/
+/.venv/
+/__pycache__/
+*.py[cod]

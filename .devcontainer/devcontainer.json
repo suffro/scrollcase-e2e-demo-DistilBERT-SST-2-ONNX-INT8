@@ -1,27 +1,30 @@
 {
-  "name": "Scrollcase sentiment demo",
-  "image": "mcr.microsoft.com/devcontainers/javascript-node:1-20-bookworm",
-  "features": {
-    "ghcr.io/devcontainers/features/python:1": {
-      "version": "3.11"
-    }
+  "name": "Build a real model into a Scrollcase box",
+
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "postAttachCommand": "code --reuse-window README.md",
+
+  "hostRequirements": {
+    "memory": "8gb"
   },
-  "postCreateCommand": "bash ./setup-demo.sh",
-  "waitFor": "postCreateCommand",
+
   "customizations": {
-    "codespaces": {
-      "openFiles": ["README.md"]
-    },
     "vscode": {
       "settings": {
         "workbench.editorAssociations": {
-          "*.md": "vscode.markdown.preview.editor"
+          "README.md": "vscode.markdown.preview.editor"
+        },
+
+        "files.exclude": {
+          ".devcontainer": true,
+          ".vscode": true,
+          ".gitignore": true,
+          ".gitattributes": true,
+          "LICENSE": true,
+          "AGENTS.md": true,
+          "node_modules": true
         }
-      },
-      "extensions": ["ms-python.python"]
+      }
     }
-  },
-  "hostRequirements": {
-    "memory": "4gb"
   }
 }

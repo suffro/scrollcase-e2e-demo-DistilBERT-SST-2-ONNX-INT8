@@ -1,16 +1,10 @@
-# Auto detect text files and perform LF normalization
 * text=auto
 
-# Files whose exact bytes are checked: either hashed into a scroll, or compared
-# byte-for-byte by the build. A Windows checkout that rewrote a line ending in
-# any of these fails the build, so they are never normalised.
-#
-# The patterns have no slash, so they match at any depth and survive a move.
-entrypoint.py -text
-MODEL_NOTICE.md -text
-APACHE-2.0.txt -text
-conda-licenses.json -text
-pixi.lock -text
+*.sh   text eol=lf
+*.json text eol=lf
 
-# Shell scripts must stay LF even on a Windows checkout.
-*.sh text eol=lf
+# Hashed into the scroll: their exact bytes are checked at build time, so a
+# checkout must never rewrite a line ending in them.
+entrypoint.py   -text
+MODEL_NOTICE.md -text
+APACHE-2.0.txt  -text
