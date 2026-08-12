@@ -31,7 +31,8 @@ scrollcase init --no-example
 
 ## 3. Create the scroll
 
-The scroll is the box's declarative input — identity, target, and what goes inside.
+The scroll is the box's declarative input: identity, target, and what goes inside. This writes the
+skeleton — everything Scrollcase can work out on its own.
 
 ```sh
 scrollcase new scroll \
@@ -55,25 +56,19 @@ scrollcase new scroll \
 `--script` points at the `entrypoint.py` in this repository: it loads the model and prints the
 result. Scrollcase hashes its exact bytes into the scroll for you.
 
-## 4. Declare the dependencies
+> You can also use just `scrollcase new scroll` and you will be prompted to enter the info with questions in the terminal.
 
-Open `scrolls/sentiment-demo/linux-x86_64-cpu/pixi.toml` and make the dependency table read:
+## 4. Add the model
 
-```toml
-[dependencies]
-python = "3.11.*"
-onnxruntime = ">=1.20,<2"
-tokenizers = ">=0.20,<0.22"
-numpy = ">=1.26,<3"
-```
+The command above wrote two files under `scrolls/sentiment-demo/linux-x86_64-cpu/`. What it could
+not know is *which* model you are packaging — so that part you write, once, now.
 
-## 5. Declare the model
+### a. `scroll.json`
 
-Open `scrolls/sentiment-demo/linux-x86_64-cpu/scroll.json` and add these fields.
-
-**The model files.** Every URL is pinned to one immutable commit, and every file is checked
-against its size and hash, so a moved or replaced artefact fails the build instead of silently
-changing the box:
+Add these fields next to the ones already there. Every URL is pinned to one immutable commit and
+checked against its size and hash, so a moved or replaced file fails the build instead of quietly
+changing the box. The environment variables keep the box offline at run time, and the self-test is
+what the box must be able to import with its own interpreter:
 
 ```json
 "modelCacheSubdir": "model-cache/distilbert-sst2",
@@ -96,20 +91,20 @@ changing the box:
     "sizeBytes": 786,
     "sha256": "27475a0750e539c105a51c59dbef1f0ab75615b0a06e96f2f4d585c46f160c2f"
   }
-]
-```
-
-**Offline at run time**, so the box cannot reach for the network even by accident:
-
-```json
+],
 "environment": {
   "HF_HUB_OFFLINE": "1",
   "TRANSFORMERS_OFFLINE": "1",
   "TOKENIZERS_PARALLELISM": "false"
-}
+},
+"selfTest": {
+  "imports": ["onnxruntime", "tokenizers", "numpy"],
+  "files": ["entrypoint.py", "model-cache/distilbert-sst2/model_int8.onnx"]
+},
+"condaDependencyLicenseAudit": "scrolls/sentiment-demo/linux-x86_64-cpu/conda-licenses.json"
 ```
 
-**The model's licence and notice**, appended to the `localFiles` array that already holds
+Then append the model's licence and notice to the `localFiles` array, which already holds
 `entrypoint.py`:
 
 ```json
@@ -125,18 +120,19 @@ changing the box:
 }
 ```
 
-**What the box must be able to import**, checked with the box's own interpreter — and where the
-dependency licence inventory lives:
+### b. `pixi.toml`
 
-```json
-"selfTest": {
-  "imports": ["onnxruntime", "tokenizers", "numpy"],
-  "files": ["entrypoint.py", "model-cache/distilbert-sst2/model_int8.onnx"]
-},
-"condaDependencyLicenseAudit": "scrolls/sentiment-demo/linux-x86_64-cpu/conda-licenses.json"
+Make the dependency table read:
+
+```toml
+[dependencies]
+python = "3.11.*"
+onnxruntime = ">=1.20,<2"
+tokenizers = ">=0.20,<0.22"
+numpy = ">=1.26,<3"
 ```
 
-## 6. Lock and audit
+## 5. Lock and audit
 
 `lock` pins the exact packages; `audit` writes the licence inventory the build will re-check.
 
@@ -146,7 +142,7 @@ scrollcase lock sentiment-demo/linux-x86_64-cpu
 scrollcase audit sentiment-demo/linux-x86_64-cpu --write
 ```
 
-## 7. Git commit
+## 6. Git commit
 
 Scrollcase refuses to build from a dirty Git working tree, so save what you just wrote in a local
 commit first:
@@ -157,10 +153,12 @@ git add . && git commit -m "Package DistilBERT SST-2"
 
 This Codespace has no remote, so the commit stays here and cannot change the demo repository.
 
-## 8. Sign and build
+## 7. Sign and build
 
-The build downloads the model once, checks every hash, packs the environment, and signs the
-result. It takes a few minutes.
+`keygen` creates your signing key pair: every box is signed, and the public half is what anyone
+who receives the box uses to check it. `build` then installs the locked environment, downloads the
+model once, checks every hash, packs it all, runs the self-test, and signs the result. It takes a
+few minutes.
 
 ```sh
 scrollcase keygen
@@ -168,7 +166,7 @@ scrollcase keygen
 scrollcase build sentiment-demo/linux-x86_64-cpu
 ```
 
-## 9. Verify
+## 8. Verify
 
 ```sh
 scrollcase verify .scrollcase/dist/boxes/sentiment-demo/1.0.0/linux-x86_64-cpu/*.release.json --self-test
