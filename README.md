@@ -25,6 +25,9 @@ scrollcase init --no-example
 ```
 
 > `--no-example` skips the disposable sample box: here you package a real model instead.
+>
+> If the `pixi` download fails, run the command again — the checksum is verified before
+> anything is installed, so a failed download leaves nothing half-written.
 
 ## 3. Create the scroll
 
