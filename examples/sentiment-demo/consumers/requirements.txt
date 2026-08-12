@@ -1,0 +1,2 @@
+# Exact pin, never a floating range: the demo must run the same consumer everywhere.
+scrollcase-consumer==0.4.1

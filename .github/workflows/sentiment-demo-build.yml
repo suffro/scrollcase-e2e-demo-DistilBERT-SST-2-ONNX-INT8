@@ -1,0 +1,195 @@
+# Real native build of the sentiment-demo box on all three CPU targets.
+#
+# This workflow never publishes anything. It exists to prove that the committed
+# scrolls still build, self-test, verify and run -- on real runners, from a
+# clean checkout, with the model actually embedded.
+name: sentiment-demo native build
+
+on:
+  push:
+    paths:
+      - "examples/sentiment-demo/**"
+      - "test/sentiment-demo.test.mjs"
+      - "test/test_entrypoint.py"
+      - "src/**"
+      - ".github/workflows/sentiment-demo-build.yml"
+  schedule:
+    # Weekly, deliberately staggered from the hello-box example build.
+    - cron: "17 4 * * 2"
+  workflow_dispatch:
+
+concurrency:
+  group: sentiment-demo-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  SCROLLCASE_VERSION: "0.9.1"
+  BOX_VERSION: "1.0.0"
+  # The demo tree doubles as a scrolls directory, exactly as documented for
+  # building the examples shipped in the Scrollcase repository.
+  SCROLLS_DIR: examples
+  POSITIVE_SENTENCE: "This product is surprisingly easy to use."
+  NEGATIVE_SENTENCE: "This was a frustrating and disappointing experience."
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64-cpu
+            runner: ubuntu-latest
+          - target: macos-aarch64-cpu
+            runner: macos-14
+          - target: windows-x86_64-cpu
+            runner: windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned toolchain
+        run: |
+          npm ci --no-audit --no-fund
+          npm install --global "scrollcase@${SCROLLCASE_VERSION}"
+          scrollcase --version
+          scrollcase init --no-example --install-toolchain --pixi-version 0.73.0
+
+      - name: Prove the checkout is clean again after scaffolding
+        run: |
+          # `init` writes SCROLLCASE.md and may touch the workspace; `build`
+          # refuses a dirty tree, and untracked files count as dirty. The
+          # toolchain under .scrollcase/ is gitignored and survives this.
+          git checkout -- .
+          git clean -fd
+          test -z "$(git status --porcelain)" || {
+            echo "::error::checkout is dirty after init scaffolding"
+            git status --porcelain
+            exit 1
+          }
+
+      - name: Doctor
+        run: |
+          scrollcase doctor --scroll sentiment-demo --target "${{ matrix.target }}" \
+            --scrolls-dir "$SCROLLS_DIR"
+
+      - name: Create an ephemeral signing key
+        run: |
+          scrollcase keygen \
+            --private-key "$RUNNER_TEMP/signing-private.pem" \
+            --public-key "$RUNNER_TEMP/signing-public.json"
+
+      - name: Build with embedded weights
+        run: |
+          scrollcase build "sentiment-demo/${{ matrix.target }}" \
+            --scrolls-dir "$SCROLLS_DIR" \
+            --weights embed \
+            --private-key "$RUNNER_TEMP/signing-private.pem" \
+            --public-key "$RUNNER_TEMP/signing-public.json"
+
+      - name: Resolve the release path
+        id: release
+        run: |
+          dir=".scrollcase/dist/boxes/sentiment-demo/${BOX_VERSION}/${{ matrix.target }}"
+          release="$(ls "$dir"/*.release.json | head -1)"
+          test -n "$release" || { echo "::error::no release produced"; exit 1; }
+          echo "path=$release" >> "$GITHUB_OUTPUT"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "release: $release"
+
+      - name: Verify with the signed self-test
+        run: |
+          scrollcase verify "${{ steps.release.outputs.path }}" \
+            --public-key "$RUNNER_TEMP/signing-public.json" --self-test
+
+      - name: Run both fixed phrases and check the output shape
+        run: |
+          assert_output() {
+            local sentence="$1" expected="$2" output label confidence
+            # Application arguments go after `--`; the sentence is deliberately
+            # unquoted so its words arrive as separate positional arguments.
+            output="$(scrollcase run "${{ steps.release.outputs.path }}" \
+              --public-key "$RUNNER_TEMP/signing-public.json" -- $sentence)"
+            echo "$output"
+
+            label="$(printf '%s\n' "$output" | sed -n 's/^Sentiment: //p')"
+            confidence="$(printf '%s\n' "$output" | sed -n 's/^Confidence: //p')"
+
+            test "$label" = "$expected" || {
+              echo "::error::expected $expected, got '${label}'"; exit 1; }
+            # The value is the model's; only its shape is asserted here.
+            printf '%s\n' "$confidence" | grep -Eq '^[0-9]+\.[0-9]%$' || {
+              echo "::error::confidence '${confidence}' is not a one-decimal percentage"; exit 1; }
+          }
+
+          assert_output "$POSITIVE_SENTENCE" POSITIVE
+          assert_output "$NEGATIVE_SENTENCE" NEGATIVE
+
+      - name: Run the same box from the Node consumer
+        working-directory: examples/sentiment-demo/consumers
+        run: |
+          npm ci --no-audit --no-fund
+          node run-box.mjs "$GITHUB_WORKSPACE/${{ steps.release.outputs.path }}" \
+            "$RUNNER_TEMP/signing-public.json" $POSITIVE_SENTENCE
+
+      - name: Run the same box from the Python consumer
+        working-directory: examples/sentiment-demo/consumers
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python run_box.py "$GITHUB_WORKSPACE/${{ steps.release.outputs.path }}" \
+            "$RUNNER_TEMP/signing-public.json" $POSITIVE_SENTENCE
+
+      - name: Report archive and extracted sizes
+        run: |
+          dir="${{ steps.release.outputs.dir }}"
+          archive="$(ls "$dir"/*.zip | head -1)"
+          {
+            echo "### ${{ matrix.target }}"
+            echo
+            echo "| Artefact | Size |"
+            echo "| --- | --- |"
+            echo "| archive | $(du -h "$archive" | cut -f1) |"
+            echo "| dist tree | $(du -sh "$dir" | cut -f1) |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Rebuild and assert the archive is byte-identical
+        run: |
+          dir="${{ steps.release.outputs.dir }}"
+          before="$(ls "$dir"/*.zip | wc -l | tr -d ' ')"
+          test "$before" -eq 1 || { echo "::error::expected 1 archive, found $before"; exit 1; }
+
+          scrollcase build "sentiment-demo/${{ matrix.target }}" \
+            --scrolls-dir "$SCROLLS_DIR" \
+            --weights embed \
+            --private-key "$RUNNER_TEMP/signing-private.pem" \
+            --public-key "$RUNNER_TEMP/signing-public.json"
+
+          # Archive names are their own content hash, so a second file here
+          # means the rebuild was not byte-identical.
+          after="$(ls "$dir"/*.zip | wc -l | tr -d ' ')"
+          test "$after" -eq 1 || {
+            echo "::error::rebuild produced a second content-addressed archive"
+            ls -l "$dir"
+            exit 1
+          }
+
+      - name: Remove the ephemeral key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/signing-private.pem" "$RUNNER_TEMP/signing-public.json"

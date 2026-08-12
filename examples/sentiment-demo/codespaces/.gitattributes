@@ -1,0 +1,8 @@
+# Files whose SHA-256 is declared in a scroll must keep their exact bytes on
+# every platform. Never let a checkout rewrite their line endings.
+entrypoint.py -text
+MODEL_NOTICE.md -text
+APACHE-2.0.txt -text
+
+# Shell scripts must stay LF even on a Windows checkout.
+*.sh text eol=lf

@@ -1,0 +1,277 @@
+# Manual-only publication of the prebuilt sentiment-demo boxes.
+#
+# Separate from the native build workflow on purpose: that one proves the demo
+# still works, this one spends a real signing key and touches a public release.
+# It is never triggered by a push, and it creates a draft by default.
+name: sentiment-demo release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag"
+        default: "sentiment-demo-v1"
+        required: true
+      title:
+        description: "Release title"
+        default: "DistilBERT sentiment demo boxes"
+        required: true
+      draft:
+        description: "Publish as a draft"
+        type: boolean
+        default: true
+      box_version:
+        description: "Box version"
+        default: "1.0.0"
+        required: true
+
+concurrency:
+  group: sentiment-demo-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SCROLLCASE_VERSION: "0.9.1"
+  SCROLLS_DIR: examples
+  PUBLIC_KEY: examples/sentiment-demo/sentiment-demo.pub.json
+  POSITIVE_SENTENCE: "This product is surprisingly easy to use."
+  NEGATIVE_SENTENCE: "This was a frustrating and disappointing experience."
+
+jobs:
+  build:
+    name: build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64-cpu
+            runner: ubuntu-latest
+          - target: macos-aarch64-cpu
+            runner: macos-14
+          - target: windows-x86_64-cpu
+            runner: windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install the pinned toolchain and restore a clean tree
+        run: |
+          npm ci --no-audit --no-fund
+          npm install --global "scrollcase@${SCROLLCASE_VERSION}"
+          scrollcase init --no-example --install-toolchain --pixi-version 0.73.0
+          git checkout -- .
+          git clean -fd
+          test -z "$(git status --porcelain)" || {
+            echo "::error::checkout is dirty after init scaffolding"
+            git status --porcelain
+            exit 1
+          }
+
+      - name: Materialise the demo signing key
+        env:
+          SIGNING_KEY: ${{ secrets.SENTIMENT_DEMO_SIGNING_KEY }}
+        run: |
+          test -n "$SIGNING_KEY" || {
+            echo "::error::SENTIMENT_DEMO_SIGNING_KEY is not configured"; exit 1; }
+          # Written straight to disk, never echoed, and never into the
+          # workspace, where it would make the tree dirty.
+          umask 077
+          printf '%s' "$SIGNING_KEY" > "$RUNNER_TEMP/signing-private.pem"
+          chmod 600 "$RUNNER_TEMP/signing-private.pem"
+
+      - name: Build and sign
+        run: |
+          scrollcase build "sentiment-demo/${{ matrix.target }}" \
+            --scrolls-dir "$SCROLLS_DIR" \
+            --weights embed \
+            --private-key "$RUNNER_TEMP/signing-private.pem" \
+            --public-key "$PUBLIC_KEY"
+
+      - name: Verify and run before packaging
+        id: release
+        run: |
+          dir=".scrollcase/dist/boxes/sentiment-demo/${{ inputs.box_version }}/${{ matrix.target }}"
+          release="$(ls "$dir"/*.release.json | head -1)"
+          test -n "$release" || { echo "::error::no release produced"; exit 1; }
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
+          echo "path=$release" >> "$GITHUB_OUTPUT"
+
+          scrollcase verify "$release" --public-key "$PUBLIC_KEY" --self-test
+
+          for pair in "POSITIVE:$POSITIVE_SENTENCE" "NEGATIVE:$NEGATIVE_SENTENCE"; do
+            expected="${pair%%:*}"; sentence="${pair#*:}"
+            label="$(scrollcase run "$release" --public-key "$PUBLIC_KEY" -- $sentence \
+              | sed -n 's/^Sentiment: //p')"
+            test "$label" = "$expected" || {
+              echo "::error::expected $expected, got '$label'"; exit 1; }
+          done
+
+      - name: Wrap the archive, release document, consumers and README
+        run: |
+          name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
+          mkdir -p "wrapper/$name/consumers"
+          cp "${{ steps.release.outputs.dir }}"/*.release.json "wrapper/$name/"
+          cp "${{ steps.release.outputs.dir }}"/*.zip "wrapper/$name/"
+          cp examples/sentiment-demo/release/README.md "wrapper/$name/"
+          cp examples/sentiment-demo/consumers/run-box.mjs \
+             examples/sentiment-demo/consumers/run_box.py \
+             examples/sentiment-demo/consumers/package.json \
+             examples/sentiment-demo/consumers/package-lock.json \
+             examples/sentiment-demo/consumers/requirements.txt \
+             "wrapper/$name/consumers/"
+
+          # The public key is deliberately NOT bundled: a signature that ships
+          # with its own key proves nothing. Consumers fetch it from the repo.
+          test ! -e "wrapper/$name/sentiment-demo.pub.json" || {
+            echo "::error::the wrapper must not ship the public key"; exit 1; }
+
+          (cd wrapper && zip -qr "$name.zip" "$name")
+          ls -l "wrapper/$name.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}
+          path: wrapper/*.zip
+          if-no-files-found: error
+
+      - name: Remove the signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/signing-private.pem"
+
+  publish:
+    name: publish
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+
+      - name: Check every expected wrapper is present
+        run: |
+          for target in linux-x86_64-cpu macos-aarch64-cpu windows-x86_64-cpu; do
+            file="assets/sentiment-demo-${{ inputs.box_version }}-${target}.zip"
+            test -f "$file" || { echo "::error::missing $file"; exit 1; }
+          done
+          ls -l assets/
+
+      - name: Upload the new assets, then remove superseded ones
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ inputs.tag }}"
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --title "${{ inputs.title }}" \
+              ${{ inputs.draft && '--draft' || '' }} \
+              --notes-file examples/sentiment-demo/release/README.md
+
+          # Upload first. A window where the release exists with no working
+          # asset is worse than one where a superseded asset is still present.
+          gh release upload "$tag" assets/*.zip --clobber
+
+          keep="$(ls assets | tr '\n' ' ')"
+          gh release view "$tag" --json assets --jq '.assets[].name' | while read -r existing; do
+            case " $keep " in
+              *" $existing "*) ;;
+              *) echo "deleting superseded asset: $existing"
+                 gh release delete-asset "$tag" "$existing" --yes ;;
+            esac
+          done
+
+  verify-published:
+    name: verify published ${{ matrix.target }}
+    needs: publish
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64-cpu
+            runner: ubuntu-latest
+          - target: macos-aarch64-cpu
+            runner: macos-14
+          - target: windows-x86_64-cpu
+            runner: windows-latest
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      # A green build job is not evidence that the published asset works.
+      # Download what the public would download, on a matching host.
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download the published wrapper
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
+          gh release download "${{ inputs.tag }}" --pattern "$name.zip" --dir "$RUNNER_TEMP"
+          unzip -q "$RUNNER_TEMP/$name.zip" -d "$RUNNER_TEMP/unpacked"
+          ls -R "$RUNNER_TEMP/unpacked"
+
+      - name: Verify and run it exactly as a user would
+        run: |
+          npm install --global "scrollcase@${SCROLLCASE_VERSION}"
+          name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
+          dir="$RUNNER_TEMP/unpacked/$name"
+          release="$(ls "$dir"/*.release.json | head -1)"
+
+          # The public key comes from the checked-out repository, independently
+          # of the downloaded archive -- never from inside the wrapper.
+          key="$GITHUB_WORKSPACE/$PUBLIC_KEY"
+          test ! -e "$dir/sentiment-demo.pub.json" || {
+            echo "::error::the wrapper must not ship the public key"; exit 1; }
+
+          scrollcase verify "$release" --public-key "$key" --self-test
+
+          output="$(scrollcase run "$release" --public-key "$key" -- $POSITIVE_SENTENCE)"
+          echo "$output"
+          test "$(printf '%s\n' "$output" | sed -n 's/^Sentiment: //p')" = "POSITIVE" || {
+            echo "::error::published asset did not classify the positive sentence"; exit 1; }
+
+      - name: Run the published wrapper's own consumer examples
+        run: |
+          name="sentiment-demo-${{ inputs.box_version }}-${{ matrix.target }}"
+          dir="$RUNNER_TEMP/unpacked/$name"
+          release="$(ls "$dir"/*.release.json | head -1)"
+          key="$GITHUB_WORKSPACE/$PUBLIC_KEY"
+
+          cd "$dir/consumers"
+          npm ci --no-audit --no-fund
+          node run-box.mjs "$release" "$key" $POSITIVE_SENTENCE
+
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python run_box.py "$release" "$key" $POSITIVE_SENTENCE

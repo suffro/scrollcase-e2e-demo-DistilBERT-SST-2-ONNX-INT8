@@ -1,0 +1,16 @@
+{
+  "name": "sentiment-demo-consumer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node consumer example for the DistilBERT SST-2 ONNX INT8 demo box",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "run-box": "node run-box.mjs"
+  },
+  "dependencies": {
+    "scrollcase": "0.9.1"
+  }
+}

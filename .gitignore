@@ -1,2 +1,9 @@
-
 .local-memory
+
+# Scrollcase build state, artefacts, toolchain and signing keys. Never
+# committed -- and it must be ignored, because `build` treats an untracked
+# file as a dirty tree and refuses to run.
+.scrollcase/
+
+node_modules/
+__pycache__/
