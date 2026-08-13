@@ -143,7 +143,7 @@ scrollcase add import sentiment-demo numpy
 scrollcase remove import sentiment-demo json
 ```
 
-The last line drops the placeholder `new scroll` started you with.
+The last line drops the placeholder that `scrollcase new scroll` started you with.
 
 Now open `scrolls/sentiment-demo/linux-x86_64-cpu/self_test.py` — the one file here that is yours to
 write, because it is the check that decides whether this box is worth signing — and replace it with:
@@ -186,12 +186,16 @@ interpreter, so a box that answers wrong is never signed.
 > declares `"extends": "../scroll.json"` plus its own differences — see
 > [one box, several targets](https://scrollcase.dev/reference/scroll#one-box-several-targets).
 
+---
+
+### This flow without interactions
+
+Here you can check this same flow but with all the declerations passed explicitly with CLI flags, instead of answering any setup questions in the terminal. This is needed for CI or enviornments where you can't interact with the terminal, or if you just want to explicitly declare all the settings.
+
 <details>
-<summary><b>The same thing without any questions</b> — for CI, or to paste in one go</summary>
+<summary><b>Here you have this same flow but with explicit declarations only</b></summary>
 
 <br>
-
-Every answer above is also a flag. Nothing here is interactive, which is what a pipeline needs:
 
 ```sh
 scrollcase new scroll \
@@ -283,11 +287,9 @@ scrollcase build sentiment-demo/linux-x86_64-cpu
 scrollcase verify .scrollcase/dist/boxes/sentiment-demo/1.0.0/linux-x86_64-cpu/*.release.json --self-test
 ```
 
-**✓ That's it**
+## ✓ That's it
 
----
-
-<br>
+Now you have a self-contained and signed box with its own deterministic and portable Python environment, that can be delivered as a complete, target-specific, verifiable product artifact that can run on another machine without the need for the end user to assemble that environment and manage its dependencies.
 
 ## How to run the box
 
