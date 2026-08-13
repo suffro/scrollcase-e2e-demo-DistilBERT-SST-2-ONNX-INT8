@@ -4,7 +4,7 @@ Sentiment analysis is an AI technique used to read text and automatically determ
 
 This demo takes **DistilBERT** sentiment analysis AI model fine-tuned on SST-2, quantised to INT8 in ONNX form, and ships it as a signed, self-contained box.
 
-<big> **Follow these steps to create, sign, build and verify the box:** </big>
+<big> **Follow these steps to create, sign, build, verify and run the box:** </big>
 
 ## 1. Install Scrollcase CLI
 
