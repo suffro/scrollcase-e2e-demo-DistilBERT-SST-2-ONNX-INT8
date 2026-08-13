@@ -74,17 +74,13 @@ ONNX stack was tested on 3.11 for this demo. It has to be set at creation time b
 You now have `scrolls/sentiment-demo/linux-x86_64-cpu/` with three files: `scroll.json`, its
 `pixi.toml`, and a starter `self_test.py`.
 
-Two paths this particular demo needs. The first is where the model files go — `entrypoint.py` looks
-for them in `model-cache/distilbert-sst2` — and the second is where `audit` will write the licence
-inventory:
+One thing this particular demo chooses: `entrypoint.py` looks for the model in
+`model-cache/distilbert-sst2`, so tell the scroll to put it there. Every field is editable this way —
+run `scrollcase edit scroll` with no flags and it lists them.
 
 ```sh
 scrollcase edit scroll sentiment-demo \
   --field modelCacheSubdir --value model-cache/distilbert-sst2
-
-scrollcase edit scroll sentiment-demo \
-  --field condaDependencyLicenseAudit \
-  --value scrolls/sentiment-demo/linux-x86_64-cpu/conda-licenses.json
 ```
 
 ### 3b. The model
@@ -127,25 +123,30 @@ scrollcase add dep sentiment-demo numpy       --version ">=1.26,<3"
 These go into `pixi.toml`. The exact versions are pinned by `pixi.lock` in the next step, not by
 these ranges.
 
-### 3e. The two things still written by hand
+### 3e. The environment and the self-test
 
-Open `scrolls/sentiment-demo/linux-x86_64-cpu/scroll.json` and add the offline environment, and the
-modules the box must be able to import:
+The box runs offline — the model is inside it, so nothing should reach out to a hub at run time:
 
-```jsonc
-"environment": {
-  "HF_HUB_OFFLINE": "1",
-  "TRANSFORMERS_OFFLINE": "1",
-  "TOKENIZERS_PARALLELISM": "false"
-},
-"selfTest": {
-  "imports": ["onnxruntime", "tokenizers", "numpy"],   // replace the generated ["json"]
-  // leave "files" and "pythonFile" as the commands wrote them
-}
+```sh
+scrollcase add env sentiment-demo HF_HUB_OFFLINE=1
+scrollcase add env sentiment-demo TRANSFORMERS_OFFLINE=1
+scrollcase add env sentiment-demo TOKENIZERS_PARALLELISM=false
 ```
 
-Then replace the generated `scrolls/sentiment-demo/linux-x86_64-cpu/self_test.py` with a check that
-runs the real model:
+And it must be able to import what it was built for. These three names are signed into the release,
+so anyone receiving the box can re-check them:
+
+```sh
+scrollcase add import sentiment-demo onnxruntime
+scrollcase add import sentiment-demo tokenizers
+scrollcase add import sentiment-demo numpy
+scrollcase remove import sentiment-demo json
+```
+
+The last line drops the placeholder `new scroll` started you with.
+
+Now open `scrolls/sentiment-demo/linux-x86_64-cpu/self_test.py` — the one file here that is yours to
+write, because it is the check that decides whether this box is worth signing — and replace it with:
 
 ```python
 """Self-test: the box must classify both sentences correctly, or it is not signed."""
@@ -176,8 +177,9 @@ This is the check that matters: it runs both sentences through the real model wi
 interpreter, so a box that answers wrong is never signed.
 
 > **Look at what you did not write.** No `pythonEntryPoint` — the target admits only one. No file
-> sizes, no hashes, no `selfTest.files` list: the `add` commands recorded all of it. And the
-> self-test is a Python file your editor understands, not a string with escaped newlines.
+> sizes, no hashes, no `selfTest.files` list: the `add` commands recorded all of it. The only file
+> you opened in an editor is `self_test.py`, which is real Python rather than a string with escaped
+> newlines — and it is the one thing here that is genuinely a decision.
 >
 > Packaging the same model for Linux, macOS and Windows does not mean doing this three times. Put
 > what they share in `scrolls/sentiment-demo/scroll.json` and give each target a short file that
@@ -203,9 +205,6 @@ scrollcase new scroll \
 
 scrollcase edit scroll sentiment-demo \
   --field modelCacheSubdir --value model-cache/distilbert-sst2
-scrollcase edit scroll sentiment-demo \
-  --field condaDependencyLicenseAudit \
-  --value scrolls/sentiment-demo/linux-x86_64-cpu/conda-licenses.json
 
 HF=https://huggingface.co/onnx-community/distilbert-base-uncased-finetuned-sst-2-english-ONNX/resolve/fd49941c1b822846cb14970cdf430a7cfbe0f5b9
 scrollcase add asset sentiment-demo $HF/onnx/model_int8.onnx
@@ -220,13 +219,22 @@ scrollcase add file sentiment-demo APACHE-2.0.txt \
 scrollcase add dep sentiment-demo onnxruntime --version ">=1.20,<2"
 scrollcase add dep sentiment-demo tokenizers  --version ">=0.20,<0.22"
 scrollcase add dep sentiment-demo numpy       --version ">=1.26,<3"
+
+scrollcase add env sentiment-demo HF_HUB_OFFLINE=1
+scrollcase add env sentiment-demo TRANSFORMERS_OFFLINE=1
+scrollcase add env sentiment-demo TOKENIZERS_PARALLELISM=false
+
+scrollcase add import sentiment-demo onnxruntime
+scrollcase add import sentiment-demo tokenizers
+scrollcase add import sentiment-demo numpy
+scrollcase remove import sentiment-demo json
 ```
 
 The other flags — `--model-id`, `--runtime-id`, `--version`, `--pixi-version` and the
 `compatibility` ones — exist too, and are left out here on purpose: each has a default worth
 taking. `scrollcase help` lists them all.
 
-The `environment` block and `selfTest.imports` in 3e, and `self_test.py`, are still yours to write.
+`self_test.py` is still yours to write — see 3e.
 
 </details>
 
