@@ -1,14 +1,10 @@
 # Build a real model into a Scrollcase box
 
-Paste these commands into the terminal to package **DistilBERT SST-2** (ONNX, INT8) into a signed
-Linux CPU box, then run it:
+Sentiment analysis is an AI technique used to read text and automatically determine the emotional tone behind it—specifically whether the opinion expressed is positive, negative, or neutral.
 
-```text
-Sentiment: POSITIVE
-Confidence: 99.9%
-```
+This demo takes **DistilBERT** sentiment analysis AI model fine-tuned on SST-2, quantised to INT8 in ONNX form, and ships it as a signed, self-contained box.
 
-The model ends up **inside** the box, so it runs with no download and no Python setup of your own.
+<big> **Follow these steps to create, sign, build and verify the box:** </big>
 
 ## 1. Install Scrollcase CLI
 
