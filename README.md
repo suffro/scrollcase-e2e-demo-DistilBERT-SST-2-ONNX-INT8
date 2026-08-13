@@ -14,150 +14,221 @@ npm install -g scrollcase
 
 ## 2. Initialize Scrollcase project
 
-`init` creates the workspace. Answer **yes** when it offers to install `pixi` and `conda-pack`.
+`init` creates the workspace, then asks one question:
 
 ```sh
 scrollcase init --no-example
 ```
 
-> `--no-example` skips the disposable sample box: here you package a real model instead.
+| It asks | Answer |
+| --- | --- |
+| This project needs pixi and conda-pack to build a box.<br>Install them into …/.scrollcase/toolchain? [Y/n] | `Y` (just press Enter) |
+
+---
+
+That is the only prompt here. `--no-example` skips the disposable sample box — you are packaging a
+real model instead — and the questions about the Node, Python and Rust consumer templates come with
+that sample, so they do not appear either.
+
+> Both tools land **inside the project**, under `.scrollcase/toolchain/`. Nothing is installed
+> system-wide and nothing is added to `PATH`; deleting that directory undoes it.
 >
-> If the `pixi` download fails, run the command again — the checksum is verified before
-> anything is installed, so a failed download leaves nothing half-written.
+> If the `pixi` download fails, run the command again — the checksum is verified before anything is
+> installed, so a failed download leaves nothing half-written.
 
 ## 3. Create the scroll
 
-The scroll is the box's declarative input: identity, target, the model to fetch, and what the box
-must be able to do. Create the folder:
+The **scroll** is the box's declarative input: identity, target, the model to fetch, and what the
+box must be able to do. You do not write it by hand — you build it up with commands.
+
+### 3a. The skeleton
 
 ```sh
-mkdir -p scrolls/sentiment-demo/linux-x86_64-cpu
+scrollcase new scroll --python-version 3.11
 ```
 
-and save this as `scrolls/sentiment-demo/linux-x86_64-cpu/scroll.json`:
+It asks you a short set of questions — use ↑/↓ and Enter on the menus:
 
-```json
-{
-  "$schema": "https://scrollcase.dev/schema/v2/scroll.schema.json",
-  "schemaVersion": 2,
-  "scrollVersion": "1.0.0",
-  "boxId": "sentiment-demo",
-  "modelId": "distilbert-sst2-onnx-int8",
-  "runtimeId": "onnxruntime-cpu",
-  "version": "1.0.0",
-  "sourceRevision": "fd49941c1b822846cb14970cdf430a7cfbe0f5b9",
-  "target": {
-    "platform": "linux",
-    "arch": "x86_64",
-    "accelerator": "cpu"
-  },
-  "compatibility": {
-    "minHostAppVersion": "1.0.0",
-    "minRamGb": 2
-  },
-  "pythonVersion": "3.11.*",
-  "pixiVersion": "0.73.0",
-  "condaDependencyLicenseAudit": "scrolls/sentiment-demo/linux-x86_64-cpu/conda-licenses.json",
-  "pythonEntryPoint": "venv/bin/python",
-  "modelCacheSubdir": "model-cache/distilbert-sst2",
-  "environment": {
-    "HF_HUB_OFFLINE": "1",
-    "TRANSFORMERS_OFFLINE": "1",
-    "TOKENIZERS_PARALLELISM": "false"
-  },
-  "assetBaseUrl": "https://assets.example.org/boxes",
-  "assets": [
-    {
-      "url": "https://huggingface.co/onnx-community/distilbert-base-uncased-finetuned-sst-2-english-ONNX/resolve/fd49941c1b822846cb14970cdf430a7cfbe0f5b9/onnx/model_int8.onnx",
-      "relativePath": "model-cache/distilbert-sst2/model_int8.onnx",
-      "sizeBytes": 67537148,
-      "sha256": "1bc93de9f1da185c67028dbac37df6c14939256e0851d28e8f9c2994d338ac4c"
-    },
-    {
-      "url": "https://huggingface.co/onnx-community/distilbert-base-uncased-finetuned-sst-2-english-ONNX/resolve/fd49941c1b822846cb14970cdf430a7cfbe0f5b9/tokenizer.json",
-      "relativePath": "model-cache/distilbert-sst2/tokenizer.json",
-      "sizeBytes": 711396,
-      "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66"
-    },
-    {
-      "url": "https://huggingface.co/onnx-community/distilbert-base-uncased-finetuned-sst-2-english-ONNX/resolve/fd49941c1b822846cb14970cdf430a7cfbe0f5b9/config.json",
-      "relativePath": "model-cache/distilbert-sst2/config.json",
-      "sizeBytes": 786,
-      "sha256": "27475a0750e539c105a51c59dbef1f0ab75615b0a06e96f2f4d585c46f160c2f"
-    }
-  ],
-  "localFiles": [
-    {
-      "sourcePath": "entrypoint.py",
-      "relativePath": "entrypoint.py",
-      "sha256": "247033008de5ab88847115ad4e643c7aeec97e22ea0e74c202b2e0e280206dc3"
-    },
-    {
-      "sourcePath": "MODEL_NOTICE.md",
-      "relativePath": "THIRD_PARTY_NOTICES/distilbert/MODEL_NOTICE.md",
-      "sha256": "eb945ca2676fe6faeafb708bedb0e5846ac4fad27449c43ddabadef886a6a5ba"
-    },
-    {
-      "sourcePath": "APACHE-2.0.txt",
-      "relativePath": "THIRD_PARTY_NOTICES/distilbert/APACHE-2.0.txt",
-      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
-    }
-  ],
-  "weights": "embed",
-  "selfTest": {
-    "imports": [
-      "onnxruntime",
-      "tokenizers",
-      "numpy"
-    ],
-    "files": [
-      "entrypoint.py",
-      "model-cache/distilbert-sst2/model_int8.onnx",
-      "model-cache/distilbert-sst2/tokenizer.json",
-      "model-cache/distilbert-sst2/config.json",
-      "THIRD_PARTY_NOTICES/distilbert/MODEL_NOTICE.md",
-      "THIRD_PARTY_NOTICES/distilbert/APACHE-2.0.txt"
-    ],
-    "pythonCode": "import math\nimport os\nimport sys\n\nsys.path.insert(0, os.getcwd())\n\nfrom entrypoint import predict\n\nCASES = (\n    ('This product is surprisingly easy to use.', 'POSITIVE'),\n    ('This was a frustrating and disappointing experience.', 'NEGATIVE'),\n)\n\nfor sentence, expected in CASES:\n    label, confidence = predict(sentence)\n    assert label == expected, f'{sentence!r}: expected {expected}, got {label}'\n    assert math.isfinite(confidence), f'{sentence!r}: confidence is not finite'\n    assert 0.0 <= confidence <= 1.0, f'{sentence!r}: confidence {confidence} outside [0, 1]'\n\nprint('self-test ok')\n"
-  },
-  "execution": {
-    "kind": "python-script",
-    "script": "entrypoint.py",
-    "defaultArgs": []
-  }
+| It asks | Answer |
+| --- | --- |
+| Which **target**? | `linux-x86_64-cpu` |
+| **Box ID** | `sentiment-demo` |
+| **Upstream revision** | `fd49941c1b822846cb14970cdf430a7cfbe0f5b9` |
+| **Asset base URL** | `https://assets.example.org/boxes` |
+| Which **weights mode**? | `embed` |
+| Which **execution kind**? | `python-script` |
+| Which **script source**? | `existing project script` |
+| **Script path** | `entrypoint.py` |
+
+---
+
+That is the whole list, and every one of them is something nothing else could answer: what this box
+is for, what it is called, which version of the model is inside, where you will publish it, and what
+runs when someone starts it. The model and runtime identity, the box version, the pixi version and
+the interpreter path are all filled in for you.
+
+The one flag is `--python-version 3.11`: the newer default would otherwise be used, and this model's
+ONNX stack was tested on 3.11 for this demo. It has to be set at creation time because it goes into
+`pixi.toml` as well as the scroll.
+
+You now have `scrolls/sentiment-demo/linux-x86_64-cpu/` with three files: `scroll.json`, its
+`pixi.toml`, and a starter `self_test.py`.
+
+Two paths this particular demo needs. The first is where the model files go — `entrypoint.py` looks
+for them in `model-cache/distilbert-sst2` — and the second is where `audit` will write the licence
+inventory:
+
+```sh
+scrollcase edit scroll sentiment-demo \
+  --field modelCacheSubdir --value model-cache/distilbert-sst2
+
+scrollcase edit scroll sentiment-demo \
+  --field condaDependencyLicenseAudit \
+  --value scrolls/sentiment-demo/linux-x86_64-cpu/conda-licenses.json
+```
+
+### 3b. The model
+
+Each `add asset` **downloads the file once** and records the size and SHA-256 it actually found.
+Those two values are the reason a scroll used to be painful to write: nobody can know them without
+fetching the file. The first command pulls 67 MB, so give it a moment.
+
+```sh
+HF=https://huggingface.co/onnx-community/distilbert-base-uncased-finetuned-sst-2-english-ONNX/resolve/fd49941c1b822846cb14970cdf430a7cfbe0f5b9
+
+scrollcase add asset sentiment-demo $HF/onnx/model_int8.onnx
+scrollcase add asset sentiment-demo $HF/tokenizer.json
+scrollcase add asset sentiment-demo $HF/config.json
+```
+
+Every URL is pinned to one immutable commit, and from now on the recorded hash is checked on every
+build — a replaced file upstream fails the build instead of quietly changing the box.
+
+### 3c. The files that ship with it
+
+```sh
+scrollcase add file sentiment-demo MODEL_NOTICE.md \
+  --to THIRD_PARTY_NOTICES/distilbert/MODEL_NOTICE.md
+
+scrollcase add file sentiment-demo APACHE-2.0.txt \
+  --to THIRD_PARTY_NOTICES/distilbert/APACHE-2.0.txt
+```
+
+`entrypoint.py` is already in the scroll — `--script` put it there.
+
+### 3d. The dependencies
+
+```sh
+scrollcase add dep sentiment-demo onnxruntime --version ">=1.20,<2"
+scrollcase add dep sentiment-demo tokenizers  --version ">=0.20,<0.22"
+scrollcase add dep sentiment-demo numpy       --version ">=1.26,<3"
+```
+
+These go into `pixi.toml`. The exact versions are pinned by `pixi.lock` in the next step, not by
+these ranges.
+
+### 3e. The two things still written by hand
+
+Open `scrolls/sentiment-demo/linux-x86_64-cpu/scroll.json` and add the offline environment, and the
+modules the box must be able to import:
+
+```jsonc
+"environment": {
+  "HF_HUB_OFFLINE": "1",
+  "TRANSFORMERS_OFFLINE": "1",
+  "TOKENIZERS_PARALLELISM": "false"
+},
+"selfTest": {
+  "imports": ["onnxruntime", "tokenizers", "numpy"],   // replace the generated ["json"]
+  // leave "files" and "pythonFile" as the commands wrote them
 }
 ```
 
-Then save this as `scrolls/sentiment-demo/linux-x86_64-cpu/pixi.toml`:
+Then replace the generated `scrolls/sentiment-demo/linux-x86_64-cpu/self_test.py` with a check that
+runs the real model:
 
-```toml
-# Environment for the sentiment-demo box (linux-x86_64-cpu).
-#
-# Only the [workspace] platforms line differs between targets. The exact packages
-# are pinned by the committed pixi.lock next to this file, not by these ranges.
+```python
+"""Self-test: the box must classify both sentences correctly, or it is not signed."""
 
-[workspace]
-name = "sentiment-demo"
-version = "1.0.0"
-description = "DistilBERT SST-2 ONNX INT8 sentiment demo box"
-channels = ["conda-forge"]
-platforms = ["linux-64"]
+import math
+import os
+import sys
 
-[dependencies]
-python = "3.11.*"
-onnxruntime = ">=1.20,<2"
-tokenizers = ">=0.20,<0.22"
-numpy = ">=1.26,<3"
+sys.path.insert(0, os.getcwd())
+
+from entrypoint import predict
+
+CASES = (
+    ("This product is surprisingly easy to use.", "POSITIVE"),
+    ("This was a frustrating and disappointing experience.", "NEGATIVE"),
+)
+
+for sentence, expected in CASES:
+    label, confidence = predict(sentence)
+    assert label == expected, f"{sentence!r}: expected {expected}, got {label}"
+    assert math.isfinite(confidence), f"{sentence!r}: confidence is not finite"
+    assert 0.0 <= confidence <= 1.0, f"{sentence!r}: confidence {confidence} outside [0, 1]"
+
+print("self-test ok")
 ```
 
-> In your own project you would generate this skeleton with `scrollcase new scroll` — interactively,
-> or with flags — and then fill in the model. It is given here complete so you can get straight to
-> the build.
+This is the check that matters: it runs both sentences through the real model with the box's own
+interpreter, so a box that answers wrong is never signed.
+
+> **Look at what you did not write.** No `pythonEntryPoint` — the target admits only one. No file
+> sizes, no hashes, no `selfTest.files` list: the `add` commands recorded all of it. And the
+> self-test is a Python file your editor understands, not a string with escaped newlines.
 >
-> Two things worth a look: every model URL is pinned to one immutable commit and checked against its
-> size and SHA-256, so a replaced file fails the build instead of quietly changing the box; and
-> `selfTest.pythonCode` runs both sentences through the real model, so a box that answers wrong is
-> never signed.
+> Packaging the same model for Linux, macOS and Windows does not mean doing this three times. Put
+> what they share in `scrolls/sentiment-demo/scroll.json` and give each target a short file that
+> declares `"extends": "../scroll.json"` plus its own differences — see
+> [one box, several targets](https://scrollcase.dev/reference/scroll#one-box-several-targets).
+
+<details>
+<summary><b>The same thing without any questions</b> — for CI, or to paste in one go</summary>
+
+<br>
+
+Every answer above is also a flag. Nothing here is interactive, which is what a pipeline needs:
+
+```sh
+scrollcase new scroll \
+  --target linux-x86_64-cpu \
+  --box-id sentiment-demo \
+  --source-revision fd49941c1b822846cb14970cdf430a7cfbe0f5b9 \
+  --asset-base-url https://assets.example.org/boxes \
+  --weights embed \
+  --execution python-script --script entrypoint.py \
+  --python-version 3.11
+
+scrollcase edit scroll sentiment-demo \
+  --field modelCacheSubdir --value model-cache/distilbert-sst2
+scrollcase edit scroll sentiment-demo \
+  --field condaDependencyLicenseAudit \
+  --value scrolls/sentiment-demo/linux-x86_64-cpu/conda-licenses.json
+
+HF=https://huggingface.co/onnx-community/distilbert-base-uncased-finetuned-sst-2-english-ONNX/resolve/fd49941c1b822846cb14970cdf430a7cfbe0f5b9
+scrollcase add asset sentiment-demo $HF/onnx/model_int8.onnx
+scrollcase add asset sentiment-demo $HF/tokenizer.json
+scrollcase add asset sentiment-demo $HF/config.json
+
+scrollcase add file sentiment-demo MODEL_NOTICE.md \
+  --to THIRD_PARTY_NOTICES/distilbert/MODEL_NOTICE.md
+scrollcase add file sentiment-demo APACHE-2.0.txt \
+  --to THIRD_PARTY_NOTICES/distilbert/APACHE-2.0.txt
+
+scrollcase add dep sentiment-demo onnxruntime --version ">=1.20,<2"
+scrollcase add dep sentiment-demo tokenizers  --version ">=0.20,<0.22"
+scrollcase add dep sentiment-demo numpy       --version ">=1.26,<3"
+```
+
+The other flags — `--model-id`, `--runtime-id`, `--version`, `--pixi-version` and the
+`compatibility` ones — exist too, and are left out here on purpose: each has a default worth
+taking. `scrollcase help` lists them all.
+
+The `environment` block and `selfTest.imports` in 3e, and `self_test.py`, are still yours to write.
+
+</details>
 
 ## 4. Lock and audit
 
@@ -183,9 +254,14 @@ This Codespace has no remote, so the commit stays here and cannot change the dem
 ## 6. Sign and build
 
 `keygen` creates your signing key pair: every box is signed, and the public half is what anyone
-who receives the box uses to check it. `build` then installs the locked environment, downloads the
-model once, checks every hash, packs it all, runs the self-test, and signs the result. It takes a
-few minutes.
+who receives the box uses to check it. `build` then installs the locked environment, fetches the
+model, checks every hash against what the scroll pins, packs it all, runs the self-test, and signs
+the result. It takes a few minutes.
+
+> The model is downloaded again here. `add asset` fetched it to find out what it was; `build` fetches
+> it to put it in the box, and checks it against the hash recorded then. There is no cache between
+> the two on purpose — the build starts from a clean scratch tree every time, which is part of what
+> makes rebuilding the same commit produce a byte-identical box.
 
 ```sh
 scrollcase keygen
