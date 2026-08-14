@@ -74,14 +74,10 @@ ONNX stack was tested on 3.11 for this demo. It has to be set at creation time b
 You now have `scrolls/sentiment-demo/linux-x86_64-cpu/` with three files: `scroll.json`, its
 `pixi.toml`, and a starter `self_test.py`.
 
-One thing this particular demo chooses: `entrypoint.py` looks for the model in
-`model-cache/distilbert-sst2`, so tell the scroll to put it there. Every field is editable this way —
-run `scrollcase edit scroll` with no flags and it lists them.
-
-```sh
-scrollcase edit scroll sentiment-demo \
-  --field modelCacheSubdir --value model-cache/distilbert-sst2
-```
+Nothing to adjust: `entrypoint.py` does not hard-code where the model lives. It reads the box's own
+`box.json` at run time and follows the `modelCacheSubdir` declared there, so the default is fine and
+the application keeps working if it ever changes. (If you do need to change a field, that is
+`scrollcase edit scroll` — run it with no flags and it lists what you can set.)
 
 ### 3b. The model
 
@@ -206,9 +202,6 @@ scrollcase new scroll \
   --weights embed \
   --execution python-script --script entrypoint.py \
   --python-version 3.11
-
-scrollcase edit scroll sentiment-demo \
-  --field modelCacheSubdir --value model-cache/distilbert-sst2
 
 HF=https://huggingface.co/onnx-community/distilbert-base-uncased-finetuned-sst-2-english-ONNX/resolve/fd49941c1b822846cb14970cdf430a7cfbe0f5b9
 scrollcase add asset sentiment-demo $HF/onnx/model_int8.onnx

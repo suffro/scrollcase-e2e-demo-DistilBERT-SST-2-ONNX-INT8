@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Sentiment demo entrypoint for the DistilBERT SST-2 ONNX INT8 box.
 
-Reads its model, tokenizer and config from files that live next to this script
-inside the box payload. Nothing is downloaded at run time and no Hugging Face
-client library is imported: the box is fully self-contained.
+Reads its model, tokenizer and config from inside the box payload, at the location
+the box's own `box.json` declares. Nothing is downloaded at run time and no Hugging
+Face client library is imported: the box is fully self-contained.
 
 The application prints exactly two lines to stdout:
 
@@ -20,7 +20,7 @@ import math
 import sys
 from pathlib import Path
 
-MODEL_SUBDIR = ("model-cache", "distilbert-sst2")
+BOX_MANIFEST = "box.json"
 MODEL_FILE = "model_int8.onnx"
 TOKENIZER_FILE = "tokenizer.json"
 CONFIG_FILE = "config.json"
@@ -35,9 +35,30 @@ class DemoError(RuntimeError):
     """A failure that should be reported to the user, not a stack trace."""
 
 
+def box_root() -> Path:
+    """The box payload root, resolved from this file and never from the caller's cwd."""
+    return Path(__file__).resolve().parent
+
+
 def model_dir() -> Path:
-    """Model directory, resolved from this file and never from the caller's cwd."""
-    return Path(__file__).resolve().parent.joinpath(*MODEL_SUBDIR)
+    """Model directory, as the box itself declares it.
+
+    A box ships a `box.json` at its root, and one of the things it states is
+    `modelCacheSubdir` -- where the model files were placed. Reading it here means
+    the application never has to guess a path, and the scroll never has to be bent
+    to match a constant compiled into this file. Change where the model lives and
+    this keeps working; hard-code it and the two drift apart silently.
+    """
+    root = box_root()
+    manifest = root / BOX_MANIFEST
+    if not manifest.is_file():
+        raise DemoError(f"missing box manifest: {manifest}")
+    try:
+        with manifest.open(encoding="utf-8") as handle:
+            subdirectory = json.load(handle)["modelCacheSubdir"]
+    except (KeyError, ValueError) as error:
+        raise DemoError(f"{BOX_MANIFEST} declares no usable modelCacheSubdir: {error}") from None
+    return root.joinpath(*str(subdirectory).split("/"))
 
 
 def join_words(words) -> str:
